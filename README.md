@@ -1,5 +1,5 @@
 # archive-it
-Used to find dups. 
+A python3 script used to find dups. 
 # setup
 The variables located at the beginning of the file require modification.
  BASE_PATH: This is where all the files to search are stored. In my case the share for my NAS. (archive)
