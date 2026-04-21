@@ -1,0 +1,95 @@
+import os
+import shutil
+from pathlib import Path
+
+# --- CONFIGURATION ---
+# Base path you provided
+BASE_PATH = Path("~").expanduser() / "disks/sp/sp"
+
+# 1. Source: Where you copied your 29GB Downloads folder
+FROM_DIR = BASE_PATH / "staging_temp"
+
+# 2. Search: The massive archive to check for duplicates
+# If your search area is the entire 'sp' directory, use BASE_PATH
+SEARCH_DIR = BASE_PATH 
+
+# 3. Destination: The local 'sorted' directory
+TO_BASE = BASE_PATH / "sorted"
+
+# 4. Safety: Where to put duplicates (since OMV has no GUI trash)
+DELETE_STAGING = BASE_PATH / "to_delete"
+
+CATEGORIES = {
+    '3d': ['.stl', '.zip', '.step', '.scad', '.3mf', '.gcode'],
+    'doc': ['.pdf', '.xml', '.gp5'],
+    'image': ['.png', '.jpg'],
+    'win': ['.exe'],
+    'mac': ['.dmg']
+}
+
+def find_duplicate(local_file, search_root):
+    """
+    Scans the share for a file with the same name AND same size.
+    Skips the Downloads and sorted folders to avoid self-matching.
+    """
+    local_size = local_file.stat().st_size
+    
+    # We walk the tree to find name matches
+    for root, dirs, files in os.walk(search_root):
+        # OPTIMIZATION: Don't search inside the folders we are currently moving files into
+        if "Downloads" in root or "sorted" in root or "duplicates_to_delete" in root:
+            continue
+            
+        if local_file.name in files:
+            remote_path = Path(root) / local_file.name
+            try:
+                # Compare sizes to be 100% sure it's a dupe
+                if remote_path.stat().st_size == local_size:
+                    return True
+            except OSError:
+                continue
+    return False
+
+# --- EXECUTION ---
+print(f"🚀 Starting OMV Local Scan...")
+print(f"Checking: {FROM_DIR}")
+
+# Create necessary directories
+DELETE_STAGING.mkdir(parents=True, exist_ok=True)
+TO_BASE.mkdir(parents=True, exist_ok=True)
+
+# Counter for summary
+stats = {"moved": 0, "dupes": 0, "skipped": 0}
+
+for local_path in FROM_DIR.iterdir():
+    # Skip directories and hidden system files
+    if not local_path.is_file() or local_path.name.startswith('.'):
+        continue
+
+    filename = local_path.name
+    ext = local_path.suffix.lower()
+
+    # 1. Determine Category
+    target_subdir = "misc"
+    for cat_name, extensions in CATEGORIES.items():
+        if ext in extensions:
+            target_subdir = cat_name
+            break
+
+    # 2. Check for Duplicates
+    print(f"🔍 Searching archive for: {filename}...", end="\r")
+    if find_duplicate(local_path, SEARCH_DIR):
+        # Instead of send2trash, we move to a delete folder
+        shutil.move(str(local_path), str(DELETE_STAGING / filename))
+        print(f"🗑️  DUPE FOUND: {filename} -> moved to duplicates_to_delete")
+        stats["dupes"] += 1
+    else:
+        # 3. Move to local staging
+        dest_folder = TO_BASE / target_subdir
+        dest_folder.mkdir(parents=True, exist_ok=True)
+        
+        shutil.move(str(local_path), str(dest_folder / filename))
+        print(f"📦 UNIQUE: {filename} -> sorted/{target_subdir}/")
+        stats["moved"] += 1
+
+print(f"\n✅ Done! Summary: {stats['moved']} moved, {stats['dupes']} duplicates identified.")
